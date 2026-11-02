@@ -3,14 +3,27 @@ authors = ["Saurabh Raj"]
 language = "en"
 src = "src"
 title = "System Design in the AI Era (2026 Edition)"
+description = "A practical, diagram-first guide to distributed systems, ML systems, LLM serving, RAG, agents, MCP and system design interviews."
 
 [output.html]
 git-repository-url = "https://github.com/saurabhraj042/ai-system-design"
+edit-url-template = "https://github.com/saurabhraj042/ai-system-design/edit/main/{path}"
+site-url = "/ai-system-design/"
 default-theme = "navy"
 preferred-dark-theme = "navy"
-curly-quotes = true
-mathjax-support = true
+smart-punctuation = true
+additional-css = ["theme/custom.css"]
+additional-js = ["theme/mermaid.min.js", "theme/book-enhance.js"]
 
 [output.html.fold]
 enable = true
-level = 1
+level = 0
+
+[output.html.search]
+enable = true
+limit-results = 30
+use-boolean-and = true
+boost-title = 2
+
+[output.html.print]
+enable = true

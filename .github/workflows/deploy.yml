@@ -3,6 +3,7 @@ name: Deploy Book to GitHub Pages
 on:
   push:
     branches: ["main"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,7 +27,10 @@ jobs:
       - name: Setup mdBook
         uses: peaceiris/actions-mdbook@v2
         with:
-          mdbook-version: 'latest'
+          mdbook-version: '0.5.4'
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
       - name: Build site
         run: mdbook build

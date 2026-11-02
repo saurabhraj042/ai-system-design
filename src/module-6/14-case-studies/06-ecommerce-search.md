@@ -1,0 +1,91 @@
+# Semantic Search for E-commerce
+
+A shopper types "red kurta for wedding under 2000". Plain keyword search may miss "maroon ethnic wear". Pure meaning-based search may ignore "under 2000". Good search needs both.
+
+## Requirements
+
+**Functional**
+- Free-text search with filters (price, size, brand) and facets.
+- Handle spelling mistakes, synonyms and mixed-language queries.
+- Show only items that are in stock, at the current price.
+
+**Non-functional**
+- Results in about 200 ms at p99 (assumption).
+- Stock and price updates visible within minutes.
+- Search quality that can be measured and improved.
+
+## Estimates (assumptions)
+
+| Item | Assumption | Result |
+|---|---|---|
+| Searches | 20 million/day | about 230/s average |
+| Peak | 5x (sale days) | about 1,150/s |
+| Products | 5 million | |
+| Product embedding | 768 dims x 4 bytes | about 3 KB each, about 15 GB total |
+
+The index is small. Search quality and freshness are the real problems. Index and ANN basics: [Chapter 7](../../module-3/07-rag-architectures.md).
+
+## High-level design
+
+```mermaid
+flowchart TD
+    Q["Query"] --> QU["Query understanding<br/>spell, category, filters"]
+    QU --> LX["Keyword search<br/>BM25"]
+    QU --> VX["Vector search<br/>ANN with filters"]
+    LX --> FU["Fusion<br/>RRF"]
+    VX --> FU
+    FU --> LT["Ranker<br/>relevance and business signals"]
+    LT --> RES["Results and facets"]
+    CAT["Catalogue changes"] --> IDX["Indexing pipeline"]
+    IDX --> LX
+    IDX --> VX
+    INV["Price and stock service"] --> RES
+```
+
+*Figure: Two retrieval paths are fused, ranked, then enriched with live price and stock.*
+
+## Deep dive 1: hybrid retrieval
+
+Keyword search (BM25) is strong for exact words: brand names, model numbers, sizes. Vector search is strong for meaning and synonyms. Use both, then merge.
+
+**Reciprocal rank fusion (RRF)** is a simple way to merge. Each document scores the sum of 1/(rank + k) over the result lists it appears in, with k often set to 60. Cormack, Clarke and Buettcher introduced it at SIGIR 2009 as an unsupervised method that needs no training data. Elastic's documentation also recommends RRF for combining full-text and vector results. Because it uses ranks, not raw scores, you do not need to scale BM25 scores and vector scores to match.
+
+## Deep dive 2: filters, freshness and understanding the query
+
+- **Filters**: "under 2000" and "size M" are exact rules, not meanings. Extract them in query understanding and apply them as hard filters inside both searches. Filtering after ANN can leave too few results.
+- **Do not embed price or stock.** They change often. Keep them out of vectors and fetch live values at the end. If an item is out of stock, drop it or push it down.
+- **Query understanding**: spelling correction, transliteration (Hinglish like "lal kurta"), category prediction. A small model or an LLM can do this. Cache results for frequent queries, since many queries repeat.
+- **Ranking**: after fusion, a learning-to-rank model uses clicks, add-to-cart, orders, margin and delivery speed. Beware of popularity bias: it buries new items.
+
+## Measuring quality
+
+- Offline: a judged set of queries with graded results, then a ranking metric such as NDCG.
+- Online: A/B tests on click-through, add-to-cart and conversion.
+- Watch "zero results" and "refined query" rates. They show where search fails.
+
+## In the AI era
+
+LLMs help in three places: rewriting vague queries, producing richer product text for embeddings, and generating relevance labels to expand judged sets (check a sample by hand, [Chapter 12](../../module-5/12-evaluation-safety.md)). A conversational shopping assistant can sit on top, calling this same search as a tool. Keep the LLM out of the per-query hot path unless the budget allows.
+
+## Trade-offs
+
+| Decision | Option A | Option B |
+|---|---|---|
+| Retrieval | Hybrid (best quality, two systems) | Keyword only (simple, misses meaning) |
+| Query rewrite | LLM (flexible, slower, costly) | Small model or rules (fast, narrower) |
+| Embeddings | General model (quick start) | Fine-tuned on your catalogue (better, more work) |
+| Freshness | Real-time updates (fresh, complex) | Hourly batch (simple, stale) |
+
+## What the interviewer expects
+
+- Why hybrid beats either alone.
+- How filters and live inventory are handled.
+- An evaluation plan, offline and online.
+- A sensible role for LLMs with cost awareness.
+
+> [!TIP]
+> **Key takeaways**
+> - Combine keyword and vector search; RRF is a simple, robust merge.
+> - Treat filters as hard rules and keep price and stock out of embeddings.
+> - Measure with judged queries and A/B tests.
+> - Use LLMs for query and catalogue understanding, outside the hot path where possible.

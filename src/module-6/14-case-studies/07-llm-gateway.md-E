@@ -1,0 +1,96 @@
+# Case Study 7: Multi-Tenant LLM Gateway
+
+A large company has 200 teams, each building AI features. If every team calls model providers directly, you get 200 API keys in code, no cost control, and one noisy team that slows everyone down. A gateway fixes this: one front door for all LLM traffic.
+
+## Requirements
+
+**Functional**
+- One API for many models and providers.
+- Per-team keys, budgets, rate limits and model access lists.
+- Routing, fallback, logging and basic guardrails.
+
+**Non-functional**
+- Small added latency (we assume under 10 ms).
+- No single team can starve the others.
+- Accurate usage and cost reporting per team.
+- Highly available: if the gateway is down, all AI features are down.
+
+## Estimates (assumptions)
+
+| Item | Assumption | Result |
+|---|---|---|
+| Teams (tenants) | 200 | |
+| Requests | 50 million/day | about 580/s average |
+| Peak | 3x | about 1,700/s |
+| Log record | 2 KB metadata only | about 100 GB/day |
+
+Storing full prompts and replies would be far larger and raises privacy issues. Log metadata by default and sample content with redaction. Gateway basics: [Chapter 1](../../module-1/01-networking.md) and [Chapter 6](../../module-3/06-llm-serving.md).
+
+## High-level design
+
+```mermaid
+flowchart TD
+    A["Team apps"] --> GW["Gateway"]
+    GW --> AU["Auth and virtual key lookup"]
+    AU --> RL["Limits and budget check"]
+    RL --> GR["Guardrails<br/>PII, policy"]
+    GR --> CA["Cache"]
+    CA --> RT["Router"]
+    RT --> P1["Provider A"]
+    RT --> P2["Provider B"]
+    RT --> P3["Self-hosted models"]
+    GW -.-> LG["Usage log and metrics"]
+    LG --> BI["Cost reports and alerts"]
+```
+
+*Figure: Every request passes the same checks before it reaches a model.*
+
+Teams use **virtual keys**: gateway keys that map to a team, not to the provider's real key. The provider keys stay secret inside the gateway. An open-source example, LiteLLM's proxy, documents virtual keys with spend tracking per key, user and team, token and request rate limits, and per-key lists of allowed models. Treat it as an example of the pattern, not the only way.
+
+## Deep dive 1: limits and budgets for tokens
+
+Classic rate limiting counts requests. LLM traffic needs **tokens**, because one request can be 50 tokens or 50,000.
+
+The catch: you do not know the output length before the call. A practical approach:
+
+1. Before the call, estimate input tokens and reserve a maximum output (the `max_tokens` setting).
+2. After the call, replace the reservation with actual usage.
+3. For streaming, count at the end. If the client disconnects, count what was generated.
+
+Keep counters in a fast shared store, such as Redis. Budgets can slightly overshoot because many gateway nodes update counters at about the same time. That is acceptable if you say so. Hard stops need strict counters, which cost latency.
+
+Also set a **concurrency limit** per tenant. Tokens per minute does not stop one team from holding all open connections. Add priority classes: customer-facing traffic before batch jobs.
+
+## Deep dive 2: routing, fallback and caching
+
+- **Routing rules**: by model name requested, by team policy (for example "regulated data stays on self-hosted models"), by cost or by health.
+- **Fallback**: if provider A errors or times out, retry on provider B. Use timeouts and circuit breakers ([Chapter 3](../../module-1/03-reliability.md)). Warning: two models can behave differently. Only fail over between models you have tested for that use case ([Chapter 12](../../module-5/12-evaluation-safety.md)).
+- **Exact and prefix caching**: Anthropic's documentation says a cache hit needs a 100% identical prefix. So the gateway must not rewrite the start of a prompt (for example by injecting a timestamp), or it breaks provider-side caching.
+- **Semantic cache**: returns a stored answer for a similar question. It saves money but is risky. Always key it by tenant, so one team never receives another's answer, and skip it for personalised prompts.
+
+## Trade-offs
+
+| Decision | Option A | Option B |
+|---|---|---|
+| Build or buy | Open-source or managed gateway (fast) | Custom (fits exactly, more upkeep) |
+| Limits | Strict, central counters (accurate, slower) | Local counters (fast, approximate) |
+| Logging | Metadata only (private, light) | Full content (debuggable, risky) |
+| Fallback | Automatic (available) | Manual (predictable quality) |
+
+## In the AI era
+
+The gateway is also the best place for governance: model allow-lists, PII masking, audit logs and spend alerts ([Chapter 10](../../module-4/10-security-governance.md)). It emits traces and cost metrics for [Chapter 11](../../module-5/11-observability.md). OWASP lists Unbounded Consumption as a top LLM risk (2025 edition). Budgets and limits at the gateway are a direct control for it.
+
+## What the interviewer expects
+
+- Token-aware limits, not just request counts.
+- Tenant isolation: limits, caches, logs and keys.
+- Failure handling for provider outages.
+- Honest discussion of overshoot, added latency and privacy.
+
+> [!TIP]
+> **Key takeaways**
+> - One gateway gives keys, limits, routing, logging and policy in a single place.
+> - Rate-limit by tokens and concurrency, using reservations that are corrected after the call.
+> - Do not rewrite prompt prefixes, and always scope caches by tenant.
+> - Fail over only between models you have evaluated.
