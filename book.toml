@@ -1,12 +1,11 @@
 [book]
 authors = ["Saurabh Raj"]
 language = "en"
-multilingual = false
 src = "src"
 title = "System Design in the AI Era (2026 Edition)"
 
 [output.html]
-git-repository-url = "https://github.com/your-username/ai-system-design"
+git-repository-url = "https://github.com/saurabhraj042/ai-system-design"
 default-theme = "navy"
 preferred-dark-theme = "navy"
 curly-quotes = true
